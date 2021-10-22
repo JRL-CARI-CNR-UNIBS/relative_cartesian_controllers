@@ -29,11 +29,7 @@ find_package(catkin REQUIRED COMPONENTS
   actionlib
   actionlib_msgs
   eigen_conversions
-)
-
-add_action_files( DIRECTORY 	action
-  FILES
-  RelativeMove.action
+  relative_cartesian_controller_msgs
 )
 
 find_package(Eigen3 3.3 REQUIRED NO_MODULE)
@@ -44,12 +40,11 @@ if(CATKIN_ENABLE_TESTING AND ENABLE_COVERAGE_TESTING)
   APPEND_COVERAGE_COMPILER_FLAGS()
 endif()
 
-generate_messages( DEPENDENCIES actionlib_msgs geometry_msgs std_msgs)
 catkin_package(
  INCLUDE_DIRS include
  LIBRARIES cnr_cartesian_position_controller
  CATKIN_DEPENDS urdf cnr_controller_interface state_space_filters cnr_hardware_interface pluginlib
-                  geometry_msgs sensor_msgs std_msgs name_sorting joint_limits_interface tf tf_conversions actionlib_msgs actionlib eigen_conversions
+                  geometry_msgs sensor_msgs std_msgs name_sorting joint_limits_interface tf tf_conversions actionlib_msgs actionlib eigen_conversions relative_cartesian_controller_msgs
  DEPENDS EIGEN3
 )
 

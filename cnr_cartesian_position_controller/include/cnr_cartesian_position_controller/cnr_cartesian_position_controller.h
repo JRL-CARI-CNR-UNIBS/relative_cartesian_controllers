@@ -1,5 +1,4 @@
-#ifndef cnr_cartesian_velocity_controller__20188101642
-#define cnr_cartesian_velocity_controller__20188101642
+#pragma once
 
 #include <cmath>
 #include <Eigen/Core>
@@ -9,7 +8,7 @@
 #include <cnr_hardware_interface/posveleff_command_interface.h>
 
 #include <actionlib/server/action_server.h>
-#include <cnr_cartesian_position_controller/RelativeMoveAction.h>
+#include <relative_cartesian_controller_msgs/RelativeMoveAction.h>
 #include <eigen_conversions/eigen_msg.h>
 #include <rosdyn_core/frame_distance.h>
 namespace ect = eigen_control_toolbox;
@@ -38,8 +37,8 @@ protected:
 
   tf::TransformListener listener_;
   std::string tool_name_;
-  std::shared_ptr<actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>>             as_;
-  std::shared_ptr<actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle> gh_;
+  std::shared_ptr<actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>>             as_;
+  std::shared_ptr<actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle> gh_;
 
   std::mutex mtx_;
   Eigen::Vector6d last_twist_of_setpoint_in_base_;
@@ -49,28 +48,24 @@ protected:
   double max_cart_ang_vel_;
   double max_cart_ang_acc_;
   double m_clik_gain;
-  double m_lin_tolerance=0.001;
-  double m_ang_tolerance=0.01;
+  double linear_tolerance_=0.001;
+  double angular_tolerance_=0.01;
   bool stop_thread_;
   bool check_actual_configuration_=true;
   bool singularity_=false;
-  std::thread m_as_thread;
+  std::thread as_thread_;
   Eigen::Affine3d T_base_destination_;
   Eigen::Affine3d T_base_setpoint_;
   Eigen::Affine3d T_base_actual_;
   double target_linear_velocity_=0.001;
   double target_angular_velocity_=0.001;
 
-  void actionGoalCallback   (actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle gh);
-  void actionCancelCallback (actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle gh);
+  void actionGoalCallback   (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
+  void actionCancelCallback (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionThreadFunction ( );
 
 };
 
 
-}
-}
-
-
-
-#endif
+}  // end namespace control
+}  // end namespace cnr

@@ -53,6 +53,17 @@ inline bool CartesianPositionController::doInit()
     max_cart_lin_acc_=0.75;
   }
 
+  if (!this->getControllerNh().getParam("cartesian_linear_tolerance",linear_tolerance_))
+  {
+    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_linear_tolerance not defined, using 0.75 m/s^2");
+    linear_tolerance_=0.001;
+  }
+  if (!this->getControllerNh().getParam("cartesian_angular_tolerance",angular_tolerance_))
+  {
+    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_angular_tolerance not defined, using 0.75 m/s^2");
+    angular_tolerance_=0.01;
+  }
+
   if (!this->getControllerNh().getParam("max_cartesian_angular_speed",max_cart_ang_vel_))
   {
     CNR_INFO(this->logger(),this->getControllerNamespace()<<"/max_cartesian_angular_speed not defined, using 0.5 rad/s");
@@ -65,9 +76,9 @@ inline bool CartesianPositionController::doInit()
     max_cart_ang_acc_=1.5;
   }
 
-  if (!this->getControllerNh().getParam("click_gain",m_clik_gain))
+  if (!this->getControllerNh().getParam("clik_gain",m_clik_gain))
   {
-    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/click_gain not defined, using 5.0");
+    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/clik_gain not defined, using 5.0");
     m_clik_gain=5.0;
   }
 
@@ -77,7 +88,7 @@ inline bool CartesianPositionController::doInit()
     check_actual_configuration_=true;
   }
 
-  as_.reset(new actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>(this->getControllerNh(), "relative_move",
+  as_.reset(new actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>(this->getControllerNh(), "relative_move",
                                                                       boost::bind(&CartesianPositionController::actionGoalCallback,    this,  _1),
                                                                       boost::bind(&CartesianPositionController::actionCancelCallback,  this,  _1),
                                                                       false));
@@ -136,9 +147,9 @@ inline bool CartesianPositionController::doStopping(const ros::Time& /*time*/)
   CNR_TRACE_START(this->logger(),"Stopping Controller");
 
   stop_thread_=true;
-  if (m_as_thread.joinable())
+  if (as_thread_.joinable())
   {
-    m_as_thread.join();
+    as_thread_.join();
   }
   CNR_RETURN_TRUE(this->logger());
 }
@@ -271,7 +282,7 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
  * @brief CartesianPositionController::actionGoalCallback
  * @param gh
  */
-void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle gh)
+void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh)
 {
   try
   {
@@ -282,9 +293,9 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
     }
     auto goal = gh.getGoal();
     singularity_=false;
-    std::shared_ptr<actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle> current_gh;
+    std::shared_ptr<actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle> current_gh;
 
-    current_gh.reset(new actionlib::ActionServer<cnr_cartesian_position_controller::RelativeMoveAction>::GoalHandle(gh));
+    current_gh.reset(new actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle(gh));
     gh_ = current_gh;
 
 
@@ -318,7 +329,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
                   "). reason = " <<
                   e.what());
         T_setpoint_destination.setIdentity();
-        cnr_cartesian_position_controller::RelativeMoveResult result;
+        relative_cartesian_controller_msgs::RelativeMoveResult result;
         result.error_code   = -1;
         result.error_string = "invalid frame id";
         gh_->setRejected(result);
@@ -348,7 +359,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
     {
       CNR_ERROR(this->logger(),"target linear velocity should be positive");
       T_setpoint_destination.setIdentity();
-      cnr_cartesian_position_controller::RelativeMoveResult result;
+      relative_cartesian_controller_msgs::RelativeMoveResult result;
       result.error_code   = -2;
       result.error_string = "target linear velocity should be positive";
       gh_->setRejected(result);
@@ -359,7 +370,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
     {
       CNR_ERROR(this->logger(),"target angular velocity should be positive");
       T_setpoint_destination.setIdentity();
-      cnr_cartesian_position_controller::RelativeMoveResult result;
+      relative_cartesian_controller_msgs::RelativeMoveResult result;
       result.error_code   = -2;
       result.error_string = "target angular velocity should be positive";
       gh_->setRejected(result);
@@ -372,17 +383,17 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
     T_base_destination_=T_base_setpoint_*T_setpoint_destination;
     mtx_.unlock();
 
-    if (m_as_thread.joinable())
+    if (as_thread_.joinable())
     {
-      m_as_thread.join();
+      as_thread_.join();
     }
 
-    m_as_thread    = std::thread(&CartesianPositionController::actionThreadFunction,this);
+    as_thread_    = std::thread(&CartesianPositionController::actionThreadFunction,this);
   }
   catch( std::exception& e )
   {
     CNR_ERROR(this->logger(),"Exception. what: " << e.what() );
-    cnr_cartesian_position_controller::RelativeMoveResult result;
+    relative_cartesian_controller_msgs::RelativeMoveResult result;
     result.error_code   = -1;
     result.error_string = std::string("exception: ")+e.what();
     gh_->setAborted(result);
@@ -390,7 +401,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
   catch( ... )
   {
     CNR_ERROR(this->logger(),"Generalized Exception.");
-    cnr_cartesian_position_controller::RelativeMoveResult result;
+    relative_cartesian_controller_msgs::RelativeMoveResult result;
     result.error_code   = -1;
     result.error_string = "goal exception";
     gh_->setAborted(result);
@@ -398,15 +409,15 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< cn
 
 }
 
-void CartesianPositionController::actionCancelCallback(actionlib::ActionServer< cnr_cartesian_position_controller::RelativeMoveAction >::GoalHandle /*gh*/)
+void CartesianPositionController::actionCancelCallback(actionlib::ActionServer< relative_cartesian_controller_msgs::RelativeMoveAction >::GoalHandle /*gh*/)
 {
   if (gh_)
   {
     gh_->setCanceled();
     stop_thread_ = true;
-    if (m_as_thread.joinable())
+    if (as_thread_.joinable())
     {
-      m_as_thread.join();
+      as_thread_.join();
     }
     gh_.reset();
   }
@@ -430,8 +441,8 @@ void CartesianPositionController::actionThreadFunction()
       CNR_ERROR(this->logger(),"Goal handle is not initialized");
       break;
     }
-    cnr_cartesian_position_controller::RelativeMoveFeedback fb;
-    cnr_cartesian_position_controller::RelativeMoveResult result;
+    relative_cartesian_controller_msgs::RelativeMoveFeedback fb;
+    relative_cartesian_controller_msgs::RelativeMoveResult result;
     mtx_.lock();
     Eigen::Affine3d T_base_setpoint=T_base_setpoint_;
     Eigen::Affine3d T_base_actual=T_base_actual_;
@@ -444,7 +455,7 @@ void CartesianPositionController::actionThreadFunction()
     else
       rosdyn::getFrameDistance(T_b_destination,T_base_setpoint,distance);
 
-    if (distance.head(3).norm()<m_lin_tolerance && distance.tail(3).norm()<m_ang_tolerance)
+    if (distance.head(3).norm()<linear_tolerance_ && distance.tail(3).norm()<angular_tolerance_)
     {
       result.error_code   = 0;
       result.error_string = "finished";
@@ -482,5 +493,5 @@ void CartesianPositionController::actionThreadFunction()
 }
 
 
-}
-}
+}  // end namespace control
+}  // end namespace cnr

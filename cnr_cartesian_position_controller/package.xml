@@ -57,6 +57,7 @@
   <depend>actionlib_msgs</depend>
   <depend>actionlib</depend>
   <depend>eigen_conversions</depend>
+  <depend>relative_cartesian_controller_msgs</depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->
