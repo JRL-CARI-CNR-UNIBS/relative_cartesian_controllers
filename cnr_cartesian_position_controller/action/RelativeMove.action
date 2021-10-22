@@ -1,0 +1,23 @@
+# relative movement from the actual position of the tool.
+# relative_pose.header.frame_id specify the reference frame for the desired movement
+# ("TOOL" is a special key to specify the end-effector)
+geometry_msgs/PoseStamped relative_pose
+
+# maximum linear velocity of the end-effector (in m/s)
+float64 target_linear_velocity
+
+# maximum angular velocity of the end-effector (in rad/s)
+float64 target_angular_velocity
+
+---
+int32  error_code
+int32  INVALID_FRAME           = -1 # relative_pose.header.frame_id is not correct
+int32  INVALID_TARGET_VELOCITY = -2 # target_angular_velocity or target_linear_velocity are not positive
+int32  SINGULARITY             = -2 # stop due to singularity
+int32  CANCELLED               = -4 # cancel or preempted
+string error_string
+---
+int8 state
+int8 MOVE = 0
+int8 FAIL = -1
+int8 DONE = 1
