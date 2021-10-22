@@ -11,10 +11,12 @@ float64 target_angular_velocity
 
 ---
 int32  error_code
-int32  INVALID_FRAME           = -1 # relative_pose.header.frame_id is not correct
-int32  INVALID_TARGET_VELOCITY = -2 # target_angular_velocity or target_linear_velocity are not positive
-int32  SINGULARITY             = -2 # stop due to singularity
-int32  CANCELLED               = -4 # cancel or preempted
+int32  SUCCESS                 =  0  # ok
+int32  INVALID_FRAME           = -1  # relative_pose.header.frame_id is not correct
+int32  INVALID_TARGET_VELOCITY = -2  # target_angular_velocity or target_linear_velocity are not positive
+int32  SINGULARITY             = -3  # stop due to singularity
+int32  CANCELLED               = -4  # cancel or preempted
+int32  UNKNOWN                 = -99 #
 string error_string
 ---
 int8 state

@@ -330,7 +330,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
                   e.what());
         T_setpoint_destination.setIdentity();
         relative_cartesian_controller_msgs::RelativeMoveResult result;
-        result.error_code   = -1;
+        result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::INVALID_FRAME;
         result.error_string = "invalid frame id";
         gh_->setRejected(result);
         return;
@@ -360,7 +360,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
       CNR_ERROR(this->logger(),"target linear velocity should be positive");
       T_setpoint_destination.setIdentity();
       relative_cartesian_controller_msgs::RelativeMoveResult result;
-      result.error_code   = -2;
+      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::INVALID_TARGET_VELOCITY;
       result.error_string = "target linear velocity should be positive";
       gh_->setRejected(result);
       return;
@@ -371,7 +371,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
       CNR_ERROR(this->logger(),"target angular velocity should be positive");
       T_setpoint_destination.setIdentity();
       relative_cartesian_controller_msgs::RelativeMoveResult result;
-      result.error_code   = -2;
+      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::INVALID_TARGET_VELOCITY;
       result.error_string = "target angular velocity should be positive";
       gh_->setRejected(result);
       return;
@@ -394,7 +394,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
   {
     CNR_ERROR(this->logger(),"Exception. what: " << e.what() );
     relative_cartesian_controller_msgs::RelativeMoveResult result;
-    result.error_code   = -1;
+    result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::UNKNOWN;
     result.error_string = std::string("exception: ")+e.what();
     gh_->setAborted(result);
   }
@@ -402,7 +402,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
   {
     CNR_ERROR(this->logger(),"Generalized Exception.");
     relative_cartesian_controller_msgs::RelativeMoveResult result;
-    result.error_code   = -1;
+    result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::UNKNOWN;
     result.error_string = "goal exception";
     gh_->setAborted(result);
   }
@@ -457,7 +457,7 @@ void CartesianPositionController::actionThreadFunction()
 
     if (distance.head(3).norm()<linear_tolerance_ && distance.tail(3).norm()<angular_tolerance_)
     {
-      result.error_code   = 0;
+      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::SUCCESS;
       result.error_string = "finished";
       gh_->setSucceeded(result);
       break;
@@ -466,7 +466,7 @@ void CartesianPositionController::actionThreadFunction()
     if( stop_thread_ )
     {
       CNR_ERROR(this->logger(),"Triggered an external stop. Break the action loop.");
-      result.error_code   = -4;
+      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::CANCELLED;
       result.error_string = "Cancelled";
       mtx_.lock();
       T_base_destination_=T_base_setpoint_;
@@ -478,7 +478,7 @@ void CartesianPositionController::actionThreadFunction()
     if (singularity_)
     {
       CNR_ERROR(this->logger(),"Singularity");
-      result.error_code   = -3;
+      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::SINGULARITY;
       result.error_string = "Singularity";
       gh_->setAborted(result);
       mtx_.lock();
