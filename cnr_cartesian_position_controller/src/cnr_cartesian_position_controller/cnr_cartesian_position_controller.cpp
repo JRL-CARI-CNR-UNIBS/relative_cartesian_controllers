@@ -133,7 +133,7 @@ inline bool CartesianPositionController::doStarting(const ros::Time& /*time*/)
   T_base_destination_=T_base_setpoint_;
   T_base_actual_=T_base_setpoint_;
   mtx_.unlock();
-
+  stop_thread_=false;
   last_twist_of_setpoint_in_base_ = Eigen::Vector6d::Zero();
   CNR_RETURN_TRUE(this->logger());
 }
