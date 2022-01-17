@@ -31,6 +31,8 @@ inline CartesianPositionController::CartesianPositionController()
  */
 inline bool CartesianPositionController::doInit()
 {
+  CNR_TRACE_START(this->logger());
+
   //INIT PUB/SUB
   std::string setpoint_topic_name;
   this->setKinUpdatePeriod(this->m_sampling_period); // superimposing the fkin_update_period,

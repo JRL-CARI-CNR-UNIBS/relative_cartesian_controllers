@@ -1,0 +1,35 @@
+clc;clear all;clc;
+
+max_lin_vel=1;
+max_lin_acc=2;
+
+max_ang_vel=1;
+max_ang_acc=2;
+
+dt=2e-3;
+
+x0=zeros(3,1);
+xf=ones(3,1);
+last_vel=zeros(3,1);
+
+err=xf-x0;
+
+dist=norm(err);
+versor=err/norm(err);
+norm_last_vel=norm(last_vel);
+
+vel_no_sat=max_lin_vel*versor;
+
+% 0.5*max_acc*dec_time^2=dec_dist
+% max_acc*dec_time=max_vel -> dec_time=max_vel/max_acc
+% dec_dist=0.5*max_vel^2/max_dec
+dec_dist=0.5*max_ve
+
+
+vel_err=vel_no_sat-last_vel;
+if (norm(vel_err)<max_lin_acc*dt)
+    acc=max_lin_acc*(vel_err)/norm(vel_err);
+    vel=last_vel+acc*dt;
+else
+    vel=vel_no_sat;
+end
