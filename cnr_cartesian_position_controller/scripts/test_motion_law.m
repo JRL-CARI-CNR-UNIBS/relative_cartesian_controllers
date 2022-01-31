@@ -9,7 +9,7 @@ max_ang_acc=2;
 dt=2e-3;
 
 x0=zeros(3,1);
-xf=ones(3,1);
+xf=0.1*ones(3,1);
 last_vel=zeros(3,1);
 t=(0:dt:10)';
 x=x0;
