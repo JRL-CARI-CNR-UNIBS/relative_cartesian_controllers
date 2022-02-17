@@ -90,6 +90,13 @@ inline bool CartesianPositionController::doInit()
     check_actual_configuration_=true;
   }
 
+  /* 0.5*max_acc*dec_time^2=dec_dist
+   * max_acc*dec_time=max_vel -> dec_time=max_vel/max_acc
+   * dec_dist=0.5*max_vel^2/max_dec
+   */
+  max_lin_dec_distance_=0.5*std::pow(max_cart_lin_vel_,2)/max_cart_lin_acc_;
+  max_ang_dec_distance_=0.5*std::pow(max_cart_ang_vel_,2)/max_cart_ang_acc_;
+
   as_.reset(new actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>(this->getControllerNh(), "relative_move",
                                                                       boost::bind(&CartesianPositionController::actionGoalCallback,    this,  _1),
                                                                       boost::bind(&CartesianPositionController::actionCancelCallback,  this,  _1),
@@ -179,8 +186,32 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
 
   Eigen::Vector6d distance_in_base;
   rosdyn::getFrameDistance(T_base_destination,T_base_setpoint_,distance_in_base);
+  double norm_lin_distance=distance_in_base.head(3).norm();
+  double norm_ang_distance=distance_in_base.tail(3).norm();
 
-  Eigen::Vector6d twist_of_setpoint_in_base = m_clik_gain*distance_in_base;
+  // check if it is a pure rotation movement
+  // if not the linear part is leading
+
+  Eigen::Vector6d versor_in_base=distance_in_base/norm_lin_distance;
+
+  Eigen::Vector6d twist_of_setpoint_in_base;
+  if (norm_lin_distance<max_lin_dec_distance_)
+  {
+    double dec_time=std::sqrt(2.0*norm_lin_distance/max_cart_lin_acc_);
+    double dec_vel=max_cart_lin_acc_*dec_time;
+    twist_of_setpoint_in_base=dec_vel*versor_in_base;
+  }
+  else
+  {
+
+  }
+
+  Eigen::Vector6d twist_error_in_base=twist_of_setpoint_in_base-last_twist_of_setpoint_in_base_;
+  if (twist_error_in_base.head(3).norm()>max_cart_lin_acc_*period.toSec())
+  {
+    Eigen::Vector6d acc_twist=max_cart_lin_acc_*twist_error_in_base/twist_error_in_base.head(3).norm();
+    twist_of_setpoint_in_base=last_twist_of_setpoint_in_base_+acc_twist*period.toSec();
+  }
 
   if (twist_of_setpoint_in_base.head(3).norm() > max_cart_lin_vel_)
     twist_of_setpoint_in_base *= max_cart_lin_vel_/twist_of_setpoint_in_base.head(3).norm();

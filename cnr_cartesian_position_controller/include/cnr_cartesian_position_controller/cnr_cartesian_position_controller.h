@@ -47,6 +47,9 @@ protected:
   double max_cart_lin_acc_;
   double max_cart_ang_vel_;
   double max_cart_ang_acc_;
+  double max_lin_dec_distance_;
+  double max_ang_dec_distance_;
+
   double m_clik_gain;
   double linear_tolerance_=0.001;
   double angular_tolerance_=0.01;
