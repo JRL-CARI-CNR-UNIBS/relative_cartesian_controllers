@@ -47,6 +47,9 @@ protected:
   double max_cart_lin_acc_;
   double max_cart_ang_vel_;
   double max_cart_ang_acc_;
+  double max_lin_dec_distance_;
+  double max_ang_dec_distance_;
+
   double m_clik_gain;
   double linear_tolerance_=0.001;
   double angular_tolerance_=0.01;
@@ -59,6 +62,8 @@ protected:
   Eigen::Affine3d T_base_actual_;
   double target_linear_velocity_=0.001;
   double target_angular_velocity_=0.001;
+
+  size_t m_distance_pub;
 
   void actionGoalCallback   (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionCancelCallback (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
