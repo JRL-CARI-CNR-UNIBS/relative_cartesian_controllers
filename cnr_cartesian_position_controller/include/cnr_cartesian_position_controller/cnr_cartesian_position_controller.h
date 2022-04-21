@@ -63,6 +63,8 @@ protected:
   double target_linear_velocity_=0.001;
   double target_angular_velocity_=0.001;
 
+  size_t m_distance_pub;
+
   void actionGoalCallback   (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionCancelCallback (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionThreadFunction ( );

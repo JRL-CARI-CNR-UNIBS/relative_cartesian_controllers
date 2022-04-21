@@ -105,6 +105,9 @@ inline bool CartesianPositionController::doInit()
 
   tool_name_=this->chain().getLinksName().back();
 
+
+  m_distance_pub = this->template add_publisher<sensor_msgs::JointState>("cartesian_distance",1000);
+
   tf::StampedTransform tf_base_tool;
   try
   {
@@ -189,80 +192,107 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
   double norm_lin_distance=distance_in_base.head(3).norm();
   double norm_ang_distance=distance_in_base.tail(3).norm();
 
-  // check if it is a pure rotation movement
-  // if not the linear part is leading
-
-  Eigen::Vector6d versor_in_base=distance_in_base/norm_lin_distance;
 
   Eigen::Vector6d twist_of_setpoint_in_base;
-  if (norm_lin_distance<max_lin_dec_distance_)
+
+  sensor_msgs::JointState dist_msg;
+  dist_msg.name.resize(2);
+  dist_msg.name.at(0)="translation";
+  dist_msg.name.at(1)="rotation";
+  dist_msg.position.resize(2,0);
+  dist_msg.velocity.resize(2,0);
+  dist_msg.effort.resize(2,0);
+  dist_msg.header.stamp=ros::Time::now();
+
+  Eigen::Vector6d tra_versor_in_base;
+  double translation_vel;
+
+  bool null_translation=false;
+  bool null_rotation=false;
+  bool tra_saturation=false;
+  if (norm_lin_distance<1e-5)
   {
-    double dec_time=std::sqrt(2.0*norm_lin_distance/max_cart_lin_acc_);
-    double dec_vel=max_cart_lin_acc_*dec_time;
-    twist_of_setpoint_in_base=dec_vel*versor_in_base;
+    tra_versor_in_base.setZero();
+    translation_vel=0.0;
+    null_translation=true;
   }
   else
   {
+    tra_versor_in_base=distance_in_base/norm_lin_distance;
+    translation_vel=tra_versor_in_base.head(3).dot(last_twist_of_setpoint_in_base_.head(3));
 
+    double tra_dec_time=std::sqrt(2.0*norm_lin_distance/max_cart_lin_acc_);
+    double dec_vel=max_cart_lin_acc_*tra_dec_time;
+    double max_vel=std::min(target_linear_velocity_,max_cart_lin_vel_);
+    double new_vel=std::min(max_vel,translation_vel+max_cart_lin_acc_*period.toSec());
+    translation_vel=std::min(new_vel,dec_vel);
+    tra_saturation= ((translation_vel==dec_vel) || (translation_vel==max_vel))&& (tra_dec_time>period.toSec()) ;
+
+    dist_msg.position.at(0)=norm_lin_distance;
+    dist_msg.velocity.at(0)=translation_vel;
+    dist_msg.effort.at(0)=dec_vel;
   }
 
-  Eigen::Vector6d twist_error_in_base=twist_of_setpoint_in_base-last_twist_of_setpoint_in_base_;
-  if (twist_error_in_base.head(3).norm()>max_cart_lin_acc_*period.toSec())
+  Eigen::Vector6d rot_versor_in_base;
+  double rotation_vel;
+  bool rot_saturation=false;;
+  if (norm_ang_distance<1e-5)
   {
-    Eigen::Vector6d acc_twist=max_cart_lin_acc_*twist_error_in_base/twist_error_in_base.head(3).norm();
-    twist_of_setpoint_in_base=last_twist_of_setpoint_in_base_+acc_twist*period.toSec();
-  }
-
-  if (twist_of_setpoint_in_base.head(3).norm() > max_cart_lin_vel_)
-    twist_of_setpoint_in_base *= max_cart_lin_vel_/twist_of_setpoint_in_base.head(3).norm();
-
-  if (twist_of_setpoint_in_base.head(3).norm() > target_linear_velocity_)
-    twist_of_setpoint_in_base *= target_linear_velocity_/twist_of_setpoint_in_base.head(3).norm();
-
-  if (twist_of_setpoint_in_base.tail(3).norm()>max_cart_ang_vel_)
-    twist_of_setpoint_in_base*=max_cart_ang_vel_/twist_of_setpoint_in_base.tail(3).norm();
-
-  if (twist_of_setpoint_in_base.tail(3).norm() > target_angular_velocity_)
-    twist_of_setpoint_in_base *= target_angular_velocity_/twist_of_setpoint_in_base.tail(3).norm();
-
-  Eigen::Vector6d Dtwist_of_setpoint_in_base;
-  if (period.toSec()>0.0)
-  {
-    Dtwist_of_setpoint_in_base = (twist_of_setpoint_in_base-last_twist_of_setpoint_in_base_)/period.toSec();
-    double scaling=1.0;
-    if (Dtwist_of_setpoint_in_base.head(3).norm()>max_cart_lin_acc_)
-      scaling=max_cart_lin_acc_/Dtwist_of_setpoint_in_base.head(3).norm();
-
-    if (Dtwist_of_setpoint_in_base.tail(3).norm()>max_cart_ang_acc_)
-      scaling=std::min(scaling,max_cart_ang_acc_/Dtwist_of_setpoint_in_base.tail(3).norm());
-
-    Dtwist_of_setpoint_in_base*=scaling;
-    twist_of_setpoint_in_base=last_twist_of_setpoint_in_base_+Dtwist_of_setpoint_in_base*period.toSec();
+    rot_versor_in_base.setZero();
+    rotation_vel=0.0;
+    rot_saturation=false;
+    null_rotation=true;
   }
   else
   {
-    twist_of_setpoint_in_base = Eigen::Vector6d::Zero( );
-    last_twist_of_setpoint_in_base_ = Eigen::Vector6d::Zero( );
+    rot_versor_in_base=distance_in_base/norm_ang_distance;
+    rotation_vel=rot_versor_in_base.tail(3).dot(last_twist_of_setpoint_in_base_.tail(3));
+    double rot_dec_time=std::sqrt(2.0*norm_ang_distance/max_cart_ang_acc_);
+    double max_vel=std::min(target_angular_velocity_,max_cart_ang_vel_);
+    double dec_vel=max_cart_ang_acc_*rot_dec_time;
+    double new_vel=std::min(max_vel,rotation_vel+max_cart_ang_acc_*period.toSec());
+
+    rotation_vel=std::min(new_vel,dec_vel);
+
+    rot_saturation= ((rotation_vel==dec_vel) || (rotation_vel==max_vel)) && (rot_dec_time>period.toSec()) ;
+
+    dist_msg.position.at(1)=norm_ang_distance;
+    dist_msg.velocity.at(1)=rotation_vel;
+    dist_msg.effort.at(1)=dec_vel;
   }
+
+  if (null_rotation)  // pure translation
+  {
+    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
+    twist_of_setpoint_in_base.tail(3)/=1000.0;
+  }
+  else if (null_translation)  // pure rotation
+  {
+    twist_of_setpoint_in_base=rotation_vel*rot_versor_in_base;
+    twist_of_setpoint_in_base.head(3)/=1000.0;
+  }
+  else if (tra_saturation) // compound movement, translation is saturated
+  {
+    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
+  }
+  else if (rot_saturation) // compound movement, rotation is saturated
+  {
+    twist_of_setpoint_in_base=rotation_vel*rot_versor_in_base;
+  }
+  else // compound movement, no saturation, translation leading
+  {
+    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
+  }
+
+  this->publish(m_distance_pub, dist_msg );
 
   Eigen::Matrix6Xd J_of_setpoint_in_base;
   J_of_setpoint_in_base=this->chainCommand().toolJacobian();  // CHECK IF CORRECT
-
-  Eigen::FullPivLU<Eigen::MatrixXd> pinv_J(J_of_setpoint_in_base);
-
-  pinv_J.setThreshold ( 1e-2 );
-
 
   Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_of_setpoint_in_base, Eigen::ComputeThinU | Eigen::ComputeThinV);
   auto sv = svd.singularValues();
   CNR_WARN_COND_THROTTLE(this->logger(),
                           (sv(sv.rows()-1)==0) || (sv(0)/sv(sv.rows()-1) > 1e2), 2, "SINGULARITY POINT" );
-
-  if(pinv_J.rank()<6)
-  {
-    CNR_WARN_THROTTLE(this->logger(),2,"rank: "<<pinv_J.rank()<<"\nJacobian\n"<<J_of_setpoint_in_base);
-    singularity_=true;
-  }
 
   rosdyn::VectorXd vel_sp = svd.solve(twist_of_setpoint_in_base);
 
@@ -398,7 +428,7 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
       gh_->setRejected(result);
       return;
     }
-    target_angular_velocity_=goal->target_linear_velocity;
+    target_angular_velocity_=goal->target_angular_velocity;
     if (target_angular_velocity_<=0)
     {
       CNR_ERROR(this->logger(),"target angular velocity should be positive");
