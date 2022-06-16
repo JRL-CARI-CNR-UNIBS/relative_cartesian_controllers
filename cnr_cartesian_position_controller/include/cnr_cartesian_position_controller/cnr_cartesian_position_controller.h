@@ -42,6 +42,7 @@ protected:
 
   std::mutex mtx_;
   Eigen::Vector6d last_twist_of_setpoint_in_base_;
+  rosdyn::VectorXd last_pos_sp_;
 
   double max_cart_lin_vel_;
   double max_cart_lin_acc_;

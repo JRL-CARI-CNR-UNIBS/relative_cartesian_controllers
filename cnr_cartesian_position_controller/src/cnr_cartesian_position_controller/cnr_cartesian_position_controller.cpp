@@ -167,6 +167,7 @@ void CartesianPositionController::overrideCallback(const std_msgs::Int64ConstPtr
   double global_override=1;
   for (const std::pair<std::string,double>& p: m_overrides)
     global_override*=p.second;
+  CNR_FATAL(this->logger(),"override = " << global_override);
   m_global_override=global_override;
 }
 
@@ -188,6 +189,7 @@ inline bool CartesianPositionController::doStarting(const ros::Time& /*time*/)
   mtx_.unlock();
   stop_thread_=false;
   last_twist_of_setpoint_in_base_ = Eigen::Vector6d::Zero();
+  last_pos_sp_ = this->getCommandPosition();
   CNR_RETURN_TRUE(this->logger());
 }
 
@@ -221,7 +223,7 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
 
   mtx_.lock();
   rosdyn::VectorXd old_vel_sp = this->getCommandVelocity();
-  rosdyn::VectorXd pos_sp = this->getCommandPosition();
+  rosdyn::VectorXd pos_sp = last_pos_sp_;//this->getCommandPosition();
   T_base_setpoint_=this->chainNonConst().getTransformation(pos_sp);
   rosdyn::VectorXd q = this->getPosition();
   T_base_actual_=this->chainNonConst().getTransformation(q);
@@ -345,7 +347,7 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
   unscaled_js_msg->effort.resize(this->nAx(),0);
   for (size_t iax=0;iax<this->nAx();iax++)
   {
-    unscaled_js_msg->position.at(iax) = q(iax);
+    unscaled_js_msg->position.at(iax) = pos_sp(iax);
     unscaled_js_msg->velocity.at(iax) = vel_sp(iax);
   }
   unscaled_js_msg->header.stamp  = ros::Time::now();
@@ -376,23 +378,24 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
                       );
   }
 
-  last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
+//  last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
 
-  if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
-                              this->getCommandPosition(),period.toSec(), 1.0, true, &report)) // CHECK!
-  {
-    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
-  }
+//  if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
+//                              this->getCommandPosition(),period.toSec(), 1.0, true, &report)) // CHECK!
+//  {
+//    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
+//  }
 
 
   pos_sp = this->getCommandPosition() + vel_sp * period.toSec();
 
-  if(rosdyn::saturatePosition(this->chainNonConst(),pos_sp, &report))
-  {
-    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
-  }
+//  if(rosdyn::saturatePosition(this->chainNonConst(),pos_sp, &report))
+//  {
+//    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
+//  }
 
   last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
+  last_pos_sp_=pos_sp;
   this->setCommandPosition( pos_sp );
   this->setCommandVelocity( vel_sp );
 
