@@ -50,6 +50,14 @@ protected:
   double max_lin_dec_distance_;
   double max_ang_dec_distance_;
 
+  size_t m_scaled_pub_id;
+  size_t m_ratio_pub_id;
+  size_t m_unscaled_pub_id;
+
+  std::map<std::string,double> m_overrides;
+  std::vector<ros::Subscriber> m_override_topic;
+  double m_global_override;
+
   double m_clik_gain;
   double linear_tolerance_=0.001;
   double angular_tolerance_=0.01;
@@ -68,6 +76,9 @@ protected:
   void actionGoalCallback   (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionCancelCallback (actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle gh);
   void actionThreadFunction ( );
+
+
+  void overrideCallback(const std_msgs::Int64ConstPtr& msg, const std::string& override_name);
 
 };
 

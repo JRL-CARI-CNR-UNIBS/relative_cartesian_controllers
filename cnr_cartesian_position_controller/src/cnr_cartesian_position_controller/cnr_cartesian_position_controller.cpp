@@ -90,6 +90,30 @@ inline bool CartesianPositionController::doInit()
     check_actual_configuration_=true;
   }
 
+  std::vector<std::string> overrides;
+  if (!this->getControllerNh().getParam("overrides",overrides))
+  {
+    CNR_DEBUG(this->logger(),"overrides are not speficied for controllers. Using default");
+    overrides.push_back("/speed_ovr");
+    overrides.push_back("/safe_ovr_1");
+    overrides.push_back("/safe_ovr_2");
+  }
+
+  CNR_TRACE(this->logger(),"subscribe override topics");
+
+  for (const std::string& override_name: overrides)
+  {
+    auto cb=boost::bind(&CartesianPositionController::overrideCallback,this,_1,override_name);
+    this->template add_subscriber<std_msgs::Int64>(override_name,1,cb,false);
+    m_overrides.insert(std::pair<std::string,double>(override_name,1.0));
+    CNR_DEBUG(this->logger(),"subscribe override = " << override_name);
+  }
+  m_global_override=1.0;
+
+  CNR_TRACE(this->logger(),"create publisher");
+  m_unscaled_pub_id = this->template add_publisher<sensor_msgs::JointState>("unscaled_joint_target",1);
+
+
   /* 0.5*max_acc*dec_time^2=dec_dist
    * max_acc*dec_time=max_vel -> dec_time=max_vel/max_acc
    * dec_dist=0.5*max_vel^2/max_dec
@@ -127,6 +151,23 @@ inline bool CartesianPositionController::doInit()
     CNR_RETURN_FALSE(this->logger());
   }
   CNR_RETURN_TRUE(this->logger());
+}
+
+
+void CartesianPositionController::overrideCallback(const std_msgs::Int64ConstPtr& msg, const std::string& override_name)
+{
+  double ovr;
+  if (msg->data>100)
+    ovr=1.0;
+  else if (msg->data<0)
+    ovr=0.0;
+  else
+    ovr=msg->data*0.01;
+  m_overrides.at(override_name)=ovr;
+  double global_override=1;
+  for (const std::pair<std::string,double>& p: m_overrides)
+    global_override*=p.second;
+  m_global_override=global_override;
 }
 
 /**
@@ -296,6 +337,22 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
 
   rosdyn::VectorXd vel_sp = svd.solve(twist_of_setpoint_in_base);
 
+
+  sensor_msgs::JointStatePtr unscaled_js_msg(new sensor_msgs::JointState());
+  unscaled_js_msg->name = this->jointNames();
+  unscaled_js_msg->position.resize(this->nAx());
+  unscaled_js_msg->velocity.resize(this->nAx());
+  unscaled_js_msg->effort.resize(this->nAx(),0);
+  for (size_t iax=0;iax<this->nAx();iax++)
+  {
+    unscaled_js_msg->position.at(iax) = q(iax);
+    unscaled_js_msg->velocity.at(iax) = vel_sp(iax);
+  }
+  unscaled_js_msg->header.stamp  = ros::Time::now();
+  this->publish(m_unscaled_pub_id,unscaled_js_msg);
+
+  vel_sp*=m_global_override;
+
   if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
                            this->getCommandPosition(),period.toSec(), 1.0, true, &report)) // CHECK!
   {
@@ -318,6 +375,7 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
                       "perpedicular velocity   = " << perpendicular_twist.transpose()
                       );
   }
+
   last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
 
   if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
