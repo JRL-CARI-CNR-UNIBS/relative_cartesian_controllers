@@ -57,12 +57,12 @@ inline bool CartesianPositionController::doInit()
 
   if (!this->getControllerNh().getParam("cartesian_linear_tolerance",linear_tolerance_))
   {
-    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_linear_tolerance not defined, using 0.75 m/s^2");
+    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_linear_tolerance not defined, using 0.001 m");
     linear_tolerance_=0.001;
   }
   if (!this->getControllerNh().getParam("cartesian_angular_tolerance",angular_tolerance_))
   {
-    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_angular_tolerance not defined, using 0.75 m/s^2");
+    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/cartesian_angular_tolerance not defined, using 0.01 rad");
     angular_tolerance_=0.01;
   }
 
@@ -78,11 +78,6 @@ inline bool CartesianPositionController::doInit()
     max_cart_ang_acc_=1.5;
   }
 
-  if (!this->getControllerNh().getParam("clik_gain",m_clik_gain))
-  {
-    CNR_INFO(this->logger(),this->getControllerNamespace()<<"/clik_gain not defined, using 5.0");
-    m_clik_gain=5.0;
-  }
 
   if (!this->getControllerNh().getParam("check_actual_configuration",check_actual_configuration_))
   {
@@ -114,13 +109,6 @@ inline bool CartesianPositionController::doInit()
   m_unscaled_pub_id = this->template add_publisher<sensor_msgs::JointState>("unscaled_joint_target",1);
 
 
-  /* 0.5*max_acc*dec_time^2=dec_dist
-   * max_acc*dec_time=max_vel -> dec_time=max_vel/max_acc
-   * dec_dist=0.5*max_vel^2/max_dec
-   */
-  max_lin_dec_distance_=0.5*std::pow(max_cart_lin_vel_,2)/max_cart_lin_acc_;
-  max_ang_dec_distance_=0.5*std::pow(max_cart_ang_vel_,2)/max_cart_ang_acc_;
-
   as_.reset(new actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>(this->getControllerNh(), "relative_move",
                                                                       boost::bind(&CartesianPositionController::actionGoalCallback,    this,  _1),
                                                                       boost::bind(&CartesianPositionController::actionCancelCallback,  this,  _1),
@@ -130,7 +118,6 @@ inline bool CartesianPositionController::doInit()
   tool_name_=this->chain().getLinksName().back();
 
 
-  m_distance_pub = this->template add_publisher<sensor_msgs::JointState>("cartesian_distance",1000);
 
   tf::StampedTransform tf_base_tool;
   try
@@ -188,8 +175,8 @@ inline bool CartesianPositionController::doStarting(const ros::Time& /*time*/)
   T_base_actual_=T_base_setpoint_;
   mtx_.unlock();
   stop_thread_=false;
-  last_twist_of_setpoint_in_base_ = Eigen::Vector6d::Zero();
   last_pos_sp_ = this->getCommandPosition();
+  scaled_time_=0.0;
   CNR_RETURN_TRUE(this->logger());
 }
 
@@ -221,123 +208,54 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
   std::stringstream report;
 
 
+  Eigen::Vector6d twist_of_setpoint_in_base;
+  Eigen::VectorXd pos_sp=last_pos_sp_;
+  rosdyn::VectorXd vel_sp(pos_sp.size());
+
   mtx_.lock();
-  rosdyn::VectorXd old_vel_sp = this->getCommandVelocity();
-  rosdyn::VectorXd pos_sp = last_pos_sp_;//this->getCommandPosition();
-  T_base_setpoint_=this->chainNonConst().getTransformation(pos_sp);
   rosdyn::VectorXd q = this->getPosition();
   T_base_actual_=this->chainNonConst().getTransformation(q);
-  Eigen::Affine3d T_base_destination=T_base_destination_;
+  if (ml_)
+  {
+    ml_->get(scaled_time_,T_base_setpoint_,twist_of_setpoint_in_base);
+    if (not(this->chainNonConst().computeLocalIk(pos_sp,T_base_setpoint_,last_pos_sp_,linear_tolerance_,period)))
+    {
+      Eigen::Vector6d err;
+      Eigen::Affine3d T_base_last_=this->chainNonConst().getTransformation(last_pos_sp_);
+      rosdyn::getFrameDistance(T_base_setpoint_, T_base_last_, err);
+      CNR_DEBUG(this->logger(),"last->setpoint matrix = \n"<< (T_base_last_.inverse()*T_base_setpoint_).matrix());
+      CNR_DEBUG(this->logger(),"error = " << err.norm());
+      CNR_DEBUG(this->logger(),"actual->setpoint matrix = \n"<< (T_base_actual_.inverse()*T_base_setpoint_).matrix());
+      if (trials_++>10)
+      {
+        CNR_ERROR(this->logger(), "unable to compute IK");
+        stop_thread_=true;
+        trials_=0;
+      }
+    }
+    else
+    {
+      trials_=0;
+    }
+
+    Eigen::Matrix6Xd J_of_setpoint_in_base;
+    J_of_setpoint_in_base=this->chainNonConst().getJacobian(pos_sp);  // CHECK IF CORRECT
+
+    Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_of_setpoint_in_base, Eigen::ComputeThinU | Eigen::ComputeThinV);
+    auto sv = svd.singularValues();
+    CNR_WARN_COND_THROTTLE(this->logger(),
+                            (sv(sv.rows()-1)==0) || (sv(0)/sv(sv.rows()-1) > 1e2), 2, "SINGULARITY POINT" );
+
+    vel_sp = svd.solve(twist_of_setpoint_in_base);
+  }
+  else
+  {
+    twist_of_setpoint_in_base.setZero();
+    T_base_setpoint_=this->chainNonConst().getTransformation(last_pos_sp_);
+    pos_sp=last_pos_sp_;
+    vel_sp.setZero();
+  }
   mtx_.unlock();
-
-  Eigen::Vector6d distance_in_base;
-  rosdyn::getFrameDistance(T_base_destination,T_base_setpoint_,distance_in_base);
-  double norm_lin_distance=distance_in_base.head(3).norm();
-  double norm_ang_distance=distance_in_base.tail(3).norm();
-
-
-  Eigen::Vector6d twist_of_setpoint_in_base;
-
-  sensor_msgs::JointState dist_msg;
-  dist_msg.name.resize(2);
-  dist_msg.name.at(0)="translation";
-  dist_msg.name.at(1)="rotation";
-  dist_msg.position.resize(2,0);
-  dist_msg.velocity.resize(2,0);
-  dist_msg.effort.resize(2,0);
-  dist_msg.header.stamp=ros::Time::now();
-
-  Eigen::Vector6d tra_versor_in_base;
-  double translation_vel;
-
-  bool null_translation=false;
-  bool null_rotation=false;
-  bool tra_saturation=false;
-  if (norm_lin_distance<1e-5)
-  {
-    tra_versor_in_base.setZero();
-    translation_vel=0.0;
-    null_translation=true;
-  }
-  else
-  {
-    tra_versor_in_base=distance_in_base/norm_lin_distance;
-    translation_vel=tra_versor_in_base.head(3).dot(last_twist_of_setpoint_in_base_.head(3));
-
-    double tra_dec_time=std::sqrt(2.0*norm_lin_distance/max_cart_lin_acc_);
-    double dec_vel=max_cart_lin_acc_*tra_dec_time;
-    double max_vel=std::min(target_linear_velocity_,max_cart_lin_vel_);
-    double new_vel=std::min(max_vel,translation_vel+max_cart_lin_acc_*period.toSec());
-    translation_vel=std::min(new_vel,dec_vel);
-    tra_saturation= ((translation_vel==dec_vel) || (translation_vel==max_vel))&& (tra_dec_time>period.toSec()) ;
-
-    dist_msg.position.at(0)=norm_lin_distance;
-    dist_msg.velocity.at(0)=translation_vel;
-    dist_msg.effort.at(0)=dec_vel;
-  }
-
-  Eigen::Vector6d rot_versor_in_base;
-  double rotation_vel;
-  bool rot_saturation=false;;
-  if (norm_ang_distance<1e-5)
-  {
-    rot_versor_in_base.setZero();
-    rotation_vel=0.0;
-    rot_saturation=false;
-    null_rotation=true;
-  }
-  else
-  {
-    rot_versor_in_base=distance_in_base/norm_ang_distance;
-    rotation_vel=rot_versor_in_base.tail(3).dot(last_twist_of_setpoint_in_base_.tail(3));
-    double rot_dec_time=std::sqrt(2.0*norm_ang_distance/max_cart_ang_acc_);
-    double max_vel=std::min(target_angular_velocity_,max_cart_ang_vel_);
-    double dec_vel=max_cart_ang_acc_*rot_dec_time;
-    double new_vel=std::min(max_vel,rotation_vel+max_cart_ang_acc_*period.toSec());
-
-    rotation_vel=std::min(new_vel,dec_vel);
-
-    rot_saturation= ((rotation_vel==dec_vel) || (rotation_vel==max_vel)) && (rot_dec_time>period.toSec()) ;
-
-    dist_msg.position.at(1)=norm_ang_distance;
-    dist_msg.velocity.at(1)=rotation_vel;
-    dist_msg.effort.at(1)=dec_vel;
-  }
-
-  if (null_rotation)  // pure translation
-  {
-    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
-    twist_of_setpoint_in_base.tail(3)/=1000.0;
-  }
-  else if (null_translation)  // pure rotation
-  {
-    twist_of_setpoint_in_base=rotation_vel*rot_versor_in_base;
-    twist_of_setpoint_in_base.head(3)/=1000.0;
-  }
-  else if (tra_saturation) // compound movement, translation is saturated
-  {
-    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
-  }
-  else if (rot_saturation) // compound movement, rotation is saturated
-  {
-    twist_of_setpoint_in_base=rotation_vel*rot_versor_in_base;
-  }
-  else // compound movement, no saturation, translation leading
-  {
-    twist_of_setpoint_in_base=translation_vel*tra_versor_in_base;
-  }
-
-  this->publish(m_distance_pub, dist_msg );
-
-  Eigen::Matrix6Xd J_of_setpoint_in_base;
-  J_of_setpoint_in_base=this->chainCommand().toolJacobian();  // CHECK IF CORRECT
-
-  Eigen::JacobiSVD<Eigen::MatrixXd> svd(J_of_setpoint_in_base, Eigen::ComputeThinU | Eigen::ComputeThinV);
-  auto sv = svd.singularValues();
-  CNR_WARN_COND_THROTTLE(this->logger(),
-                          (sv(sv.rows()-1)==0) || (sv(0)/sv(sv.rows()-1) > 1e2), 2, "SINGULARITY POINT" );
-
-  rosdyn::VectorXd vel_sp = svd.solve(twist_of_setpoint_in_base);
 
 
   sensor_msgs::JointStatePtr unscaled_js_msg(new sensor_msgs::JointState());
@@ -349,53 +267,16 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
   {
     unscaled_js_msg->position.at(iax) = pos_sp(iax);
     unscaled_js_msg->velocity.at(iax) = vel_sp(iax);
+    unscaled_js_msg->effort.at(iax)= (pos_sp(iax)-last_pos_sp_(iax))/period.toSec();
   }
   unscaled_js_msg->header.stamp  = ros::Time::now();
   this->publish(m_unscaled_pub_id,unscaled_js_msg);
 
   vel_sp*=m_global_override;
 
-  if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
-                           this->getCommandPosition(),period.toSec(), 1.0, true, &report)) // CHECK!
-  {
-    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
-  }
+  scaled_time_+=period.toSec()*m_global_override;
 
-  Eigen::Vector6d twist_of_t_in_bcommand=J_of_setpoint_in_base*vel_sp;
-  Eigen::Vector6d versor=twist_of_setpoint_in_base.normalized();
-  Eigen::Vector6d parallel_twist=twist_of_t_in_bcommand.dot(versor)*versor;
-  Eigen::Vector6d perpendicular_twist=twist_of_t_in_bcommand -parallel_twist;
-
-  if (perpendicular_twist.norm()>1e-6)
-  {
-    vel_sp*=1e-6/perpendicular_twist.norm();
-    CNR_WARN_THROTTLE(this->logger(),1,"saturating velocity, direction error (perpendicular norm = " << perpendicular_twist.norm() <<  ") due to singularity and joint limits");
-    CNR_DEBUG_THROTTLE(this->logger(),1,
-                      "twist_of_t_in_b         = " << twist_of_setpoint_in_base.transpose() << std::endl <<
-                      "twist_of_t_in_bcommand = " << twist_of_t_in_bcommand.transpose() << std::endl <<
-                      "parallel_twist velocity = " << parallel_twist.transpose() << std::endl <<
-                      "perpedicular velocity   = " << perpendicular_twist.transpose()
-                      );
-  }
-
-//  last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
-
-//  if(rosdyn::saturateSpeed(this->chainNonConst(),vel_sp,old_vel_sp,
-//                              this->getCommandPosition(),period.toSec(), 1.0, true, &report)) // CHECK!
-//  {
-//    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
-//  }
-
-
-  pos_sp = this->getCommandPosition() + vel_sp * period.toSec();
-
-//  if(rosdyn::saturatePosition(this->chainNonConst(),pos_sp, &report))
-//  {
-//    CNR_DEBUG_THROTTLE(this->logger(), 2.0, "\n" << report.str() );
-//  }
-
-  last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
-  last_pos_sp_=pos_sp;
+  last_pos_sp_=pos_sp+vel_sp*period.toSec();
   this->setCommandPosition( pos_sp );
   this->setCommandVelocity( vel_sp );
 
@@ -416,7 +297,6 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
       stop_thread_=true;
     }
     auto goal = gh.getGoal();
-    singularity_=false;
     std::shared_ptr<actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle> current_gh;
 
     current_gh.reset(new actionlib::ActionServer<relative_cartesian_controller_msgs::RelativeMoveAction>::GoalHandle(gh));
@@ -503,8 +383,16 @@ void CartesianPositionController::actionGoalCallback(actionlib::ActionServer< re
     CNR_INFO(this->logger(),"[ "<<this->getControllerNamespace()<<" ] New Goal Received, action start!");
     gh_->setAccepted();
 
+
     mtx_.lock();
     T_base_destination_=T_base_setpoint_*T_setpoint_destination;
+    ml_=std::make_shared<MotionLaw>(target_linear_velocity_,
+                                    max_cart_ang_acc_,
+                                    target_angular_velocity_,
+                                    max_cart_ang_acc_,
+                                    T_base_destination_,
+                                    T_base_actual_);
+    scaled_time_=0.0;
     mtx_.unlock();
 
     if (as_thread_.joinable())
@@ -544,6 +432,9 @@ void CartesianPositionController::actionCancelCallback(actionlib::ActionServer< 
       as_thread_.join();
     }
     gh_.reset();
+    m_mtx.lock();
+    ml_.reset();
+    m_mtx.unlock();
   }
   else
   {
@@ -554,8 +445,6 @@ void CartesianPositionController::actionCancelCallback(actionlib::ActionServer< 
 void CartesianPositionController::actionThreadFunction()
 {
   ros::WallRate lp(100);
-
-  ros::Time leaving_timer;
 
   while (this->getControllerNh().ok())
   {
@@ -594,26 +483,17 @@ void CartesianPositionController::actionThreadFunction()
       result.error_string = "Cancelled";
       mtx_.lock();
       T_base_destination_=T_base_setpoint_;
+      ml_.reset();
       mtx_.unlock();
       gh_->setAborted(result);
       break;
     }
 
-    if (singularity_)
-    {
-      CNR_ERROR(this->logger(),"Singularity");
-      result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::SINGULARITY;
-      result.error_string = "Singularity";
-      gh_->setAborted(result);
-      mtx_.lock();
-      T_base_destination_=T_base_setpoint_;
-      mtx_.unlock();
-      break;
-    }
 
     gh_->publishFeedback(fb);
   }
   gh_.reset();
+  stop_thread_=false;
 }
 
 
