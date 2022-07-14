@@ -218,7 +218,7 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
   if (ml_)
   {
     ml_->get(scaled_time_,T_base_setpoint_,twist_of_setpoint_in_base);
-    if (not(this->chainNonConst().computeLocalIk(pos_sp,T_base_setpoint_,last_pos_sp_,linear_tolerance_,period)))
+    if (not(this->chainNonConst().computeLocalIk(pos_sp,T_base_setpoint_,last_pos_sp_,0.1*linear_tolerance_,period)))
     {
       Eigen::Vector6d err;
       Eigen::Affine3d T_base_last_=this->chainNonConst().getTransformation(last_pos_sp_);
@@ -468,6 +468,7 @@ void CartesianPositionController::actionThreadFunction()
     else
       rosdyn::getFrameDistance(T_b_destination,T_base_setpoint,distance);
 
+    CNR_ERROR_THROTTLE(this->logger(),1.0,"distance = " << distance);
     if (distance.head(3).norm()<linear_tolerance_ && distance.tail(3).norm()<angular_tolerance_)
     {
       result.error_code   = relative_cartesian_controller_msgs::RelativeMoveResult::SUCCESS;
