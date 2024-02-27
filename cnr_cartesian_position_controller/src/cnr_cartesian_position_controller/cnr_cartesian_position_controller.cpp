@@ -317,6 +317,17 @@ inline bool CartesianPositionController::doUpdate(const ros::Time& /*time*/, con
                       "parallel_twist velocity = " << parallel_twist.transpose() << std::endl <<
                       "perpedicular velocity   = " << perpendicular_twist.transpose()
                       );
+    singularity_times += 1;
+    if (singularity_times == 10)
+    {
+      ROS_FATAL("Singolarity");
+      singularity_times = 0;
+      CNR_RETURN_FALSE(this->logger());
+    }
+  }
+  else
+  {
+    singularity_times = 0;
   }
   last_twist_of_setpoint_in_base_=J_of_setpoint_in_base*vel_sp;
 

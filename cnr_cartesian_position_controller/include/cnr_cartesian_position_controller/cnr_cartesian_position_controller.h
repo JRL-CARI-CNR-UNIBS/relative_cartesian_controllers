@@ -56,6 +56,7 @@ protected:
   bool stop_thread_;
   bool check_actual_configuration_=true;
   bool singularity_=false;
+  int singularity_times = 0;
   std::thread as_thread_;
   Eigen::Affine3d T_base_destination_;
   Eigen::Affine3d T_base_setpoint_;
